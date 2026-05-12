@@ -2,6 +2,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from django.core.cache import cache
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from .models import Product , Order , OrderItem
 from .serializers import ProductSerializer , OrderSerializer , OrderItemSerializer , CreateOrderSerializer
@@ -26,7 +27,30 @@ io_executor = ThreadPoolExecutor(max_workers=IO_WORKERS, thread_name_prefix="IO_
 
 CPU_WORKERS = n_cores + 1
 cpu_executor = ThreadPoolExecutor(max_workers=CPU_WORKERS, thread_name_prefix="CPU_Worker")
+def send_email_notification(order_id):
 
+    print(
+        f"Running Email Task in thread: {threading.current_thread().name}"
+    )
+
+    # محاكاة عملية ارسال ايميل
+    time.sleep(3)
+
+    print(f"Email sent successfully for order {order_id}")
+
+
+def generate_invoice(order_id):
+
+    print(
+        f"Running Invoice Task in thread: {threading.current_thread().name}"
+    )
+
+    total = 0
+
+    for i in range(10_000_000):
+        total += i
+
+    print(f"Invoice generated for order {order_id}")
 @api_view(['POST'])
 @authentication_classes([]) 
 @permission_classes([AllowAny]) 
@@ -127,15 +151,8 @@ class ProductDetailAPIView(APIView):
 
         io_executor.submit(run_delete)
         return Response({"message": "Product deletion is being processed"}, status=202)
-    
-
 class OrderListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        orders = Order.objects.filter(user=request.user)
-        serializer = OrderSerializer(orders, many=True)
-        return Response(serializer.data)
 
     def post(self, request):
         serializer = CreateOrderSerializer(data=request.data)
@@ -148,22 +165,35 @@ class OrderListCreateAPIView(APIView):
             return Response({"error": "Invalid quantity"}, status=400)
 
         def run_create_order_logic(user):
-            with transaction.atomic():
-                updated = Product.objects.filter(
-                    id=product_id,
-                    stock__gte=quantity
-                ).update(stock=F('stock') - quantity)
+            try:
+                with transaction.atomic():
+                    updated = Product.objects.filter(
+                        id=product_id,
+                        stock__gte=quantity
+                    ).update(stock=F('stock') - quantity)
 
-                if not updated:
-                    return 
+                    if not updated:
+                        print(f"Stock insufficient for product {product_id}")
+                        return 
 
-                order = Order.objects.create(user=user)
+                    order = Order.objects.create(user=user)
+                    OrderItem.objects.create(
+                        order=order,
+                        product_id=product_id,
+                        quantity=quantity
+                    )
 
-                OrderItem.objects.create(
-                    order=order,
-                    product_id=product_id,
-                    quantity=quantity
-                )
+                
+                io_executor.submit(send_email_notification, order.id)
+
+
+
+
+
+
+                
+            except Exception as e:
+                print(f"Error in background task: {e}")
 
         io_executor.submit(run_create_order_logic, request.user)
         
@@ -230,16 +260,48 @@ class OrderDetailAPIView(APIView):
         io_executor.submit(run_delete_logic)
         return Response({"message": "Order deleted"}, status=202)
 
+# class PayOrderAPIView(APIView):
+#     def post(self, request, id):
+#         order = get_object_or_404(Order, id=id, user=request.user)
+#         def process_payment():
+# #حطيت قيمة سليب 2 لحتى يحاكي عملية الدفع 
+#             time.sleep(2) 
+#             order.status = 'PAID'
+#             order.save()
+#             # CPU intensive task
+# cpu_executor.submit(generate_invoice,order.id)
+#         io_executor.submit(process_payment)
+#         return Response({"message": "Payment sent for processing"}, status=202)
 class PayOrderAPIView(APIView):
+
     def post(self, request, id):
+
         order = get_object_or_404(Order, id=id, user=request.user)
+
         def process_payment():
-#حطيت قيمة سليب 2 لحتى يحاكي عملية الدفع 
-            time.sleep(2) 
+
+            # محاكاة عملية الدفع
+            time.sleep(2)
+
             order.status = 'PAID'
             order.save()
+
+
+
+
+            cpu_executor.submit(generate_invoice, order.id)
+
+
+
+
+
         io_executor.submit(process_payment)
-        return Response({"message": "Payment sent for processing"}, status=202)
+    
+
+        return Response(
+            {"message": "Payment sent for processing"},
+            status=202
+        )
 
 class CompleteOrderAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -282,3 +344,7 @@ class CancelOrderAPIView(APIView):
 
         io_executor.submit(run_cancel_logic)
         return Response({"message": "Order cancellation is being processed"}, status=202)
+
+
+
+
