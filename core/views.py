@@ -41,7 +41,6 @@ cpu_executor = ThreadPoolExecutor(
 def send_email_notification(order_id):
     print(f"Running Email Task in thread: {threading.current_thread().name}")
 
-    # محاكاة عملية ارسال ايميل
     time.sleep(3)
 
     print(f"Email sent successfully for order {order_id}")
@@ -80,17 +79,6 @@ class ProductListCreateAPIView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    # def get(self, request):
-
-    #     cached_data = cache.get("products_list_cache")
-
-    #     if cached_data:
-
-    #         io_executor.submit(self.refresh_cache)
-    #         return Response(cached_data)
-    #     data = self.refresh_cache()
-    #     return Response(data)
-
     def get(self, request):
         cached = cache.get("products:list")
         if cached is not None:
@@ -106,21 +94,6 @@ class ProductListCreateAPIView(APIView):
         response = Response(data)
         response["X-Cache"] = "MISS"
         return response
-
-    # def post(self, request):
-    #     serializer = ProductSerializer(data=request.data)
-    #     if serializer.is_valid():
-
-    #         def save_product():
-    #             serializer.save()
-    #             self.refresh_cache()
-
-    #         io_executor.submit(save_product)
-    #         return Response(
-    #             {"message": "Product is being created"}, status=status.HTTP_202_ACCEPTED
-    #         )
-
-    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def post(self, request):
         serializer = ProductSerializer(data=request.data)
@@ -154,14 +127,7 @@ class ProductDetailAPIView(APIView):
         except Product.DoesNotExist:
             return None
 
-    # def get(self, request, id):
-    #     product = self.get_object(id)
-    #     if not product:
-    #         return Response({"error": "Not found"}, status=404)
-
-    #     serializer = ProductSerializer(product)
-    #     return Response(serializer.data)
-
+    
     def get(self, request, id):
         key = f"product:{id}"
         cached = cache.get(key)
@@ -182,22 +148,6 @@ class ProductDetailAPIView(APIView):
         response["X-Cache"] = "MISS"
         return response
 
-    # def put(self, request, id):
-    #     product = self.get_object(id)
-    #     if not product:
-    #         return Response({"error": "Not found"}, status=404)
-
-    #     serializer = ProductSerializer(product, data=request.data)
-
-    #     if serializer.is_valid():
-
-    #         def run_save():
-    #             serializer.save()
-
-    #         io_executor.submit(run_save)
-    #         return Response({"message": "Product is being updated"}, status=202)
-
-    #     return Response(serializer.errors, status=400)
 
     def put(self, request, id):
         product = self.get_object(id)
@@ -218,17 +168,6 @@ class ProductDetailAPIView(APIView):
 
         return Response(serializer.errors, status=400)
 
-    # def delete(self, request, id):
-    #     product = self.get_object(id)
-    #     if not product:
-    #         return Response({"error": "Not found"}, status=404)
-
-    #     def run_delete():
-    #         product.delete()
-
-    #     io_executor.submit(run_delete)
-    #     return Response({"message": "Product deletion is being processed"}, status=202)
-
 
     def delete(self, request, id):
         product = self.get_object(id)
@@ -245,47 +184,6 @@ class ProductDetailAPIView(APIView):
             {"message": "Product deletion is being processed"}, status=202
         )
 
-
-
-# class OrderListCreateAPIView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request):
-#         serializer = CreateOrderSerializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-
-#         product_id = serializer.validated_data["product_id"]
-#         quantity = serializer.validated_data["quantity"]
-
-#         if quantity <= 0:
-#             return Response({"error": "Invalid quantity"}, status=400)
-
-        # def run_create_order_logic(user):
-        #     try:
-        #         with transaction.atomic():
-        #             updated = Product.objects.filter(
-        #                 id=product_id, stock__gte=quantity
-        #             ).update(stock=F("stock") - quantity)
-
-        #             if not updated:
-        #                 print(f"Stock insufficient for product {product_id}")
-        #                 return
-
-        #             order = Order.objects.create(user=user)
-        #             OrderItem.objects.create(
-        #                 order=order, product_id=product_id, quantity=quantity
-        #             )
-
-        #         io_executor.submit(send_email_notification, order.id)
-
-        #     except Exception as e:
-        #         print(f"Error in background task: {e}")
-
-        # io_executor.submit(run_create_order_logic, request.user)
-
-        # return Response(
-        #     {"message": "Order processing started"}, status=status.HTTP_202_ACCEPTED
-        # )
 
 class OrderListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -330,7 +228,6 @@ class OrderListCreateAPIView(APIView):
                         order=order, product_id=product_id, quantity=quantity
                     )
 
-               #هون ضفت فكرة انو بعد نجاح العملية نسمح الكاش مشان فورا الشخص يلي بعده يحصل على الكمية المحدثة مو السابقة
                 cache.delete("products:list")
                 cache.delete(f"product:{product_id}")
                 cache.delete("products:top10")
@@ -341,7 +238,6 @@ class OrderListCreateAPIView(APIView):
                 print(f"Error in background task: {e}")
 
             finally:
-                # مهم جداً: تحرير الـ lock
                 cache.delete(lock_key)
 
         # تشغيل الـ task
@@ -352,7 +248,7 @@ class OrderListCreateAPIView(APIView):
             status=status.HTTP_202_ACCEPTED,
         )
 
-
+# القفل التشاؤمي
 class OrderDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -376,21 +272,17 @@ class OrderDetailAPIView(APIView):
 
                 new_quantity = int(new_quantity)
 
-                # نحسب الفرق
                 diff = new_quantity - item.quantity
 
                 if diff > 0 and product.stock < diff:
                     return
 
-                # نعدل المخزون
                 product.stock -= diff
                 product.save()
 
-                # نعدل الطلب
                 item.quantity = new_quantity
                 item.save()
 
-               # نفس الشي حذفنا الكاش بعد العملية
                 cache.delete("products:list")
                 cache.delete(f"product:{product.id}")
 
@@ -409,11 +301,9 @@ class OrderDetailAPIView(APIView):
                 if item:
                     product = item.product
 
-                    # رجع الكمية للمخزون
                     product.stock += item.quantity
                     product.save()
 
-                    # كمان نظفنا الكاش هون
                     cache.delete("products:list")
                     cache.delete(f"product:{product.id}")
 
@@ -422,18 +312,6 @@ class OrderDetailAPIView(APIView):
         io_executor.submit(run_delete_logic)
         return Response({"message": "Order deleted"}, status=202)
 
-# class PayOrderAPIView(APIView):
-#     def post(self, request, id):
-#         order = get_object_or_404(Order, id=id, user=request.user)
-#         def process_payment():
-# #حطيت قيمة سليب 2 لحتى يحاكي عملية الدفع
-#             time.sleep(2)
-#             order.status = 'PAID'
-#             order.save()
-#             # CPU intensive task
-# cpu_executor.submit(generate_invoice,order.id)
-#         io_executor.submit(process_payment)
-#         return Response({"message": "Payment sent for processing"}, status=202)
 
 class PayOrderAPIView(APIView):
 
@@ -441,7 +319,6 @@ class PayOrderAPIView(APIView):
         order = get_object_or_404(Order, id=id, user=request.user)
 
         def process_payment():
-            # محاكاة عملية الدفع
             time.sleep(2)
 
             order.status = "PAID"
@@ -491,11 +368,9 @@ class CancelOrderAPIView(APIView):
                 if item:
                     product = item.product
 
-                    # رجع المخزون
                     product.stock += item.quantity
                     product.save()
 
-                    # كمان هون نظفنا الكاش
                     cache.delete(f"product:{product.id}")
                     cache.delete("products:top10")
 
@@ -591,7 +466,6 @@ class CheckoutAPIView(APIView):
         def run_checkout(user):
             lock_key = f"lock:product:{product_id}"
 
-            # 🔐 Distributed Lock
             acquired = cache.add(lock_key, "locked", timeout=10)
 
             if not acquired:
@@ -600,7 +474,6 @@ class CheckoutAPIView(APIView):
 
             try:
                 with transaction.atomic():
-                    # 1️⃣ تحديث المخزون
                     updated = Product.objects.filter(
                         id=product_id, stock__gte=quantity
                     ).update(
@@ -612,24 +485,20 @@ class CheckoutAPIView(APIView):
                         print("Not enough stock")
                         return
 
-                    # 2️⃣ إنشاء الطلب
                     order = Order.objects.create(user=user)
 
                     OrderItem.objects.create(
                         order=order, product_id=product_id, quantity=quantity
                     )
 
-                    # 3️⃣ 💳 الدفع (Mock داخل نفس transaction)
                     time.sleep(1)  # محاكاة دفع
                     order.status = "PAID"
                     order.save()
 
-                # 4️⃣ تنظيف الكاش بعد النجاح
                 cache.delete("products:list")
                 cache.delete(f"product:{product_id}")
                 cache.delete("products:top10")
 
-                # 5️⃣ async email
                 io_executor.submit(send_email_notification, order.id)
 
                 print("CHECKOUT SUCCESS ✔")
@@ -638,7 +507,6 @@ class CheckoutAPIView(APIView):
                 print(f"Checkout error: {e}")
 
             finally:
-                # 🔓 تحرير القفل
                 cache.delete(lock_key)
 
         io_executor.submit(run_checkout, request.user)
